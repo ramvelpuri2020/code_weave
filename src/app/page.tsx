@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Hero } from "@/components/hero";
 import { CodeEditor } from "@/components/code-editor";
 import { AnalysisResults } from "@/components/analysis-results";
+import { AnalysisHistory, type HistoryItem } from "@/components/analysis-history";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, Loader2 } from "lucide-react";
+import type { AnalysisResult } from "@/types/analysis";
 
 const placeholderCode = `// Paste your code here to analyze it
 function authenticateUser(email, password) {
@@ -30,19 +32,96 @@ export default function Home() {
   const [code, setCode] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(
+    null
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryItem[]>(() => {
+    if (typeof window === "undefined") {
+      return [];
+    }
+
+    const raw = localStorage.getItem("analysis-history");
+    if (!raw) {
+      return [];
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as Array<
+        Partial<HistoryItem> & { snippet?: string }
+      >;
+      return parsed
+        .map((item) => ({
+          id: item.id ?? crypto.randomUUID(),
+          createdAt: item.createdAt ?? new Date().toISOString(),
+          code: item.code ?? item.snippet ?? "",
+          result: item.result as AnalysisResult,
+        }))
+        .filter((item) => item.code.trim().length > 0 && item.result);
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("analysis-history", JSON.stringify(history));
+  }, [history]);
 
   const handleAnalyze = async () => {
     if (!code.trim()) return;
 
     setIsAnalyzing(true);
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    setIsAnalyzing(false);
-    setShowResults(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ code }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to analyze code.");
+      }
+
+      const data = (await response.json()) as AnalysisResult;
+      setAnalysisResult(data);
+      setShowResults(true);
+
+      const nextItem: HistoryItem = {
+        id: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+        code,
+        result: data,
+      };
+
+      setHistory((prev) => [nextItem, ...prev].slice(0, 10));
+    } catch {
+      setError("Could not analyze your code right now. Please try again.");
+      setShowResults(false);
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const handleReset = () => {
     setShowResults(false);
     setCode("");
+    setAnalysisResult(null);
+    setError(null);
+  };
+
+  const handleLoadFromHistory = (item: HistoryItem) => {
+    setCode(item.code);
+    setAnalysisResult(item.result);
+    setShowResults(true);
+    setError(null);
+  };
+
+  const handleClearHistory = () => {
+    setHistory([]);
   };
 
   return (
@@ -87,6 +166,18 @@ export default function Home() {
               Paste any code snippet to get a plain-English explanation and test
               your understanding
             </p>
+
+            {error ? (
+              <p className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-center text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
+
+            <AnalysisHistory
+              items={history}
+              onLoad={handleLoadFromHistory}
+              onClear={handleClearHistory}
+            />
           </div>
         ) : (
           <div className="space-y-6">
@@ -104,7 +195,7 @@ export default function Home() {
               </Button>
             </div>
 
-            <AnalysisResults />
+            {analysisResult ? <AnalysisResults result={analysisResult} /> : null}
           </div>
         )}
       </div>

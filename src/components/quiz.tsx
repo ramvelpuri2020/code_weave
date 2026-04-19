@@ -3,19 +3,14 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Check, X } from "lucide-react";
-
-interface Question {
-  id: number;
-  question: string;
-  options: string[];
-  correctAnswer: number;
-}
+import type { QuizQuestion } from "@/types/analysis";
 
 interface QuizProps {
-  questions: Question[];
+  questions: QuizQuestion[];
+  onComplete?: (score: number, total: number) => void;
 }
 
-export function Quiz({ questions }: QuizProps) {
+export function Quiz({ questions, onComplete }: QuizProps) {
   const [selectedAnswers, setSelectedAnswers] = useState<
     Record<number, number>
   >({});
@@ -30,7 +25,9 @@ export function Quiz({ questions }: QuizProps) {
   };
 
   const handleCheckAnswers = () => {
+    const score = getScore();
     setShowResults(true);
+    onComplete?.(score, questions.length);
   };
 
   const handleReset = () => {

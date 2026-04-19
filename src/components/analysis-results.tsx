@@ -1,54 +1,38 @@
 "use client";
 
+import { useState } from "react";
 import { Quiz } from "@/components/quiz";
 import { FileText, HelpCircle } from "lucide-react";
+import { CodeEditor } from "@/components/code-editor";
+import { Button } from "@/components/ui/button";
+import type { AnalysisResult } from "@/types/analysis";
 
-const placeholderExplanation = `This code defines a React component that implements a user authentication form with the following key behaviors:
+interface AnalysisResultsProps {
+  result: AnalysisResult;
+}
 
-**Form Structure**
-The component renders a controlled form with email and password input fields. Each field maintains its own state using the useState hook, allowing for real-time validation and user feedback.
+export function AnalysisResults({ result }: AnalysisResultsProps) {
+  const [challengeUnlocked, setChallengeUnlocked] = useState(false);
+  const [lastScore, setLastScore] = useState<{ score: number; total: number } | null>(
+    null
+  );
+  const [challengeSolution, setChallengeSolution] = useState(
+    result.challenge.starterCode
+  );
+  const [solutionSubmitted, setSolutionSubmitted] = useState(false);
 
-**Validation Logic**
-Before submission, the form validates that the email matches a standard email pattern using a regular expression. The password must be at least 8 characters and contain at least one number and one special character.
+  const handleQuizComplete = (score: number, total: number) => {
+    setLastScore({ score, total });
+    setChallengeUnlocked(true);
+  };
 
-**State Management**
-The component uses three separate state variables: one for form data, one for validation errors, and one for submission status. This separation allows for clean handling of different concerns.
+  const handleSubmitSolution = () => {
+    setSolutionSubmitted(true);
+  };
 
-**Event Handling**
-The onSubmit handler prevents default form behavior, runs validation, and conditionally calls the authentication API. Error states are cleared on successful submission.`;
-
-const placeholderQuestions = [
-  {
-    id: 1,
-    question:
-      "What hook is primarily used to manage form field values in this component?",
-    options: ["useEffect", "useState", "useReducer", "useMemo"],
-    correctAnswer: 1,
-  },
-  {
-    id: 2,
-    question:
-      "What is the minimum password length required by the validation logic?",
-    options: ["6 characters", "8 characters", "10 characters", "12 characters"],
-    correctAnswer: 1,
-  },
-  {
-    id: 3,
-    question:
-      "What does the onSubmit handler do before calling the authentication API?",
-    options: [
-      "Refreshes the page",
-      "Clears all form fields",
-      "Prevents default form behavior and runs validation",
-      "Redirects to a different page",
-    ],
-    correctAnswer: 2,
-  },
-];
-
-export function AnalysisResults() {
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className="space-y-6">
+      <div className="grid gap-6 lg:grid-cols-2">
       <div className="rounded-xl border border-border bg-card p-6">
         <div className="mb-4 flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/10">
@@ -59,7 +43,7 @@ export function AnalysisResults() {
           </h3>
         </div>
         <div className="prose prose-sm prose-invert max-w-none">
-          {placeholderExplanation.split("\n\n").map((paragraph, index) => {
+          {result.explanation.split("\n\n").map((paragraph, index) => {
             if (paragraph.startsWith("**") && paragraph.includes("**")) {
               const title = paragraph.match(/\*\*(.*?)\*\*/)?.[1];
               const content = paragraph.replace(/\*\*.*?\*\*\n?/, "");
@@ -95,8 +79,68 @@ export function AnalysisResults() {
             Test your understanding
           </h3>
         </div>
-        <Quiz questions={placeholderQuestions} />
+        <Quiz questions={result.questions} onComplete={handleQuizComplete} />
       </div>
+      </div>
+
+      {challengeUnlocked ? (
+        <div className="rounded-xl border border-border bg-card p-6 space-y-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <h3 className="text-lg font-semibold text-foreground">
+              Challenge Mode: {result.challenge.title}
+            </h3>
+            {lastScore ? (
+              <p className="text-sm text-muted-foreground">
+                Quiz score: {lastScore.score}/{lastScore.total}
+              </p>
+            ) : null}
+          </div>
+
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            {result.challenge.prompt}
+          </p>
+
+          {result.challenge.constraints.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-foreground">Constraints</p>
+              <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                {result.challenge.constraints.map((constraint, index) => (
+                  <li key={`${constraint}-${index}`}>{constraint}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          <CodeEditor
+            value={challengeSolution}
+            onChange={setChallengeSolution}
+            placeholder={result.challenge.starterCode}
+          />
+
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              Write your own solution before checking external hints.
+            </p>
+            <Button onClick={handleSubmitSolution} size="sm">
+              Submit My Solution
+            </Button>
+          </div>
+
+          {solutionSubmitted ? (
+            <div className="rounded-lg border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-foreground">
+              Nice work. Your solution is saved locally in the editor. Next, test it
+              with a few custom inputs in your own runtime.
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border bg-card p-6">
+          <p className="text-sm text-muted-foreground">
+            Finish the quiz to unlock a harder coding challenge and write your own
+            solution.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
