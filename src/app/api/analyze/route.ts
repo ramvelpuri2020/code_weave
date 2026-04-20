@@ -39,7 +39,7 @@ export async function POST(request: Request) {
             },
             {
               role: "user",
-              content: `Analyze this code and return JSON in exactly this shape: { "explanation": "3-5 sentence plain english explanation", "questions": [ { "id": "1", "question": "question text", "options": ["A) option", "B) option", "C) option", "D) option"], "correctAnswer": 0 } ], "challenge": { "title": "short challenge title", "prompt": "harder coding problem based on the original snippet", "constraints": ["constraint 1", "constraint 2"], "starterCode": "function solve(input) {\\n  // write your solution\\n}" } } — generate 3 quiz questions and one harder challenge problem. Here is the code: ${code}`,
+              content: `Analyze this code and return JSON in exactly this shape: { "explanation": "3-5 sentence plain english explanation", "questions": [ { "id": "1", "question": "question text", "options": ["A) option", "B) option", "C) option", "D) option"], "correctAnswer": 0 } ], "challenge": { "title": "short challenge title", "prompt": "harder coding problem based on the original snippet", "constraints": ["constraint 1", "constraint 2"], "starterCode": "function solve(input) {\\n  // write your solution\\n}", "tests": [ { "name": "example", "input": "1", "expected": "1" } ] } } — generate 3 quiz questions and one harder challenge problem. Include 3-5 tests. Each test input/expected must be JSON strings (use JSON.stringify rules) so they can be parsed with JSON.parse. The starterCode must define function solve(input) { ... } and return the correct output for each test input. Here is the code: ${code}`,
             },
           ],
         }),
@@ -111,6 +111,19 @@ export async function POST(request: Request) {
           starterCode:
             parsed.challenge?.starterCode ??
             "function solve(input) {\n  // write your solution\n}",
+          tests: (parsed.challenge?.tests ?? [])
+            .map((test, index) => ({
+              name:
+                typeof test?.name === "string" && test.name.trim()
+                  ? test.name.trim()
+                  : `Test ${index + 1}`,
+              input: typeof test?.input === "string" ? test.input : JSON.stringify(test?.input),
+              expected:
+                typeof test?.expected === "string"
+                  ? test.expected
+                  : JSON.stringify(test?.expected),
+            }))
+            .filter((test) => test.input.trim().length > 0 && test.expected.trim().length > 0),
         },
       };
 

@@ -5,13 +5,35 @@ import { Quiz } from "@/components/quiz";
 import { FileText, HelpCircle } from "lucide-react";
 import { CodeEditor } from "@/components/code-editor";
 import { Button } from "@/components/ui/button";
-import type { AnalysisResult } from "@/types/analysis";
+import type { AnalysisResult, ChallengeTestCase } from "@/types/analysis";
 
 interface AnalysisResultsProps {
   result: AnalysisResult;
 }
 
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  return `{${keys
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+    .join(",")}}`;
+}
+
+function parseJsonValue(raw: string): unknown {
+  return JSON.parse(raw);
+}
+
 export function AnalysisResults({ result }: AnalysisResultsProps) {
+  const tests = result.challenge.tests ?? [];
+
   const [challengeUnlocked, setChallengeUnlocked] = useState(false);
   const [lastScore, setLastScore] = useState<{ score: number; total: number } | null>(
     null
@@ -20,14 +42,63 @@ export function AnalysisResults({ result }: AnalysisResultsProps) {
     result.challenge.starterCode
   );
   const [solutionSubmitted, setSolutionSubmitted] = useState(false);
+  const [testResults, setTestResults] = useState<
+    Array<{
+      test: ChallengeTestCase;
+      pass: boolean;
+      got?: string;
+      error?: string;
+    }>
+  >([]);
+  const [runnerError, setRunnerError] = useState<string | null>(null);
 
   const handleQuizComplete = (score: number, total: number) => {
     setLastScore({ score, total });
     setChallengeUnlocked(true);
   };
 
+  function runHiddenTests() {
+    setRunnerError(null);
+    setTestResults([]);
+
+    try {
+      const runner = new Function(
+        "input",
+        `${challengeSolution}\nreturn solve(input);`
+      ) as (input: unknown) => unknown;
+
+      const nextResults = tests.map((test) => {
+        try {
+          const input = parseJsonValue(test.input);
+          const expected = parseJsonValue(test.expected);
+          const got = runner(input);
+          const pass = stableStringify(got) === stableStringify(expected);
+          return {
+            test,
+            pass,
+            got: stableStringify(got),
+          };
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          return {
+            test,
+            pass: false,
+            error: message,
+          };
+        }
+      });
+
+      setTestResults(nextResults);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRunnerError(message);
+    }
+  }
+
   const handleSubmitSolution = () => {
     setSolutionSubmitted(true);
+    runHiddenTests();
   };
 
   return (
@@ -121,17 +192,77 @@ export function AnalysisResults({ result }: AnalysisResultsProps) {
             <p className="text-xs text-muted-foreground">
               Write your own solution before checking external hints.
             </p>
-            <Button onClick={handleSubmitSolution} size="sm">
-              Submit My Solution
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button onClick={runHiddenTests} variant="outline" size="sm">
+                Run Tests
+              </Button>
+              <Button onClick={handleSubmitSolution} size="sm">
+                Submit My Solution
+              </Button>
+            </div>
           </div>
 
           {solutionSubmitted ? (
             <div className="rounded-lg border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-foreground">
-              Nice work. Your solution is saved locally in the editor. Next, test it
-              with a few custom inputs in your own runtime.
+              Submitted. Hidden tests were executed locally in your browser.
             </div>
           ) : null}
+
+          {runnerError ? (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              Could not run tests: {runnerError}
+            </div>
+          ) : null}
+
+          {tests.length > 0 ? (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-foreground">Hidden tests</p>
+                <p className="text-xs text-muted-foreground">
+                  {testResults.length > 0
+                    ? `${testResults.filter((item) => item.pass).length}/${
+                        testResults.length
+                      } passed`
+                    : "Not run yet"}
+                </p>
+              </div>
+
+              {testResults.length > 0 ? (
+                <div className="space-y-2">
+                  {testResults.map((item, index) => (
+                    <div
+                      key={`${item.test.name ?? "test"}-${index}`}
+                      className={`rounded-lg border px-3 py-2 text-sm ${
+                        item.pass
+                          ? "border-success/30 bg-success/10 text-success"
+                          : "border-destructive/30 bg-destructive/10 text-destructive"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-medium">{item.test.name ?? `Test ${index + 1}`}</span>
+                        <span className="text-xs">{item.pass ? "PASS" : "FAIL"}</span>
+                      </div>
+                      {item.error ? (
+                        <p className="mt-1 text-xs">{item.error}</p>
+                      ) : (
+                        <p className="mt-1 text-xs">
+                          expected {item.test.expected} · got {item.got}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Click Run Tests to validate your solution against the generated cases.
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No hidden tests were returned for this challenge yet.
+            </p>
+          )}
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-card p-6">

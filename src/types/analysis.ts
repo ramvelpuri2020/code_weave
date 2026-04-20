@@ -10,6 +10,13 @@ export interface ChallengeProblem {
   prompt: string;
   constraints: string[];
   starterCode: string;
+  tests: ChallengeTestCase[];
+}
+
+export interface ChallengeTestCase {
+  name?: string;
+  input: string;
+  expected: string;
 }
 
 export interface AnalysisResult {
