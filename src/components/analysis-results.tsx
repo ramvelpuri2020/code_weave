@@ -5,7 +5,7 @@ import { Quiz } from "@/components/quiz";
 import { FileText, HelpCircle } from "lucide-react";
 import { CodeEditor } from "@/components/code-editor";
 import { Button } from "@/components/ui/button";
-import type { AnalysisResult, ChallengeTestCase } from "@/types/analysis";
+import type { AnalysisResult } from "@/types/analysis";
 
 interface AnalysisResultsProps {
   result: AnalysisResult;
@@ -31,6 +31,30 @@ function parseJsonValue(raw: string): unknown {
   return JSON.parse(raw);
 }
 
+type EditableTestCase = {
+  id: string;
+  name: string;
+  input: string;
+  expected: string;
+};
+
+function createId(): string {
+  const cryptoObj = globalThis.crypto;
+  if (cryptoObj?.randomUUID) {
+    return cryptoObj.randomUUID();
+  }
+
+  return `id_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function formatJsonLabel(raw: string): string {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+}
+
 export function AnalysisResults({ result }: AnalysisResultsProps) {
   const tests = result.challenge.tests ?? [];
 
@@ -44,20 +68,31 @@ export function AnalysisResults({ result }: AnalysisResultsProps) {
   const [solutionSubmitted, setSolutionSubmitted] = useState(false);
   const [testResults, setTestResults] = useState<
     Array<{
-      test: ChallengeTestCase;
+      label: string;
+      kind: "hidden" | "custom";
       pass: boolean;
       got?: string;
+      expectedRaw?: string;
+      inputRaw?: string;
       error?: string;
     }>
   >([]);
   const [runnerError, setRunnerError] = useState<string | null>(null);
+  const [customTests, setCustomTests] = useState<EditableTestCase[]>([
+    {
+      id: createId(),
+      name: "My test 1",
+      input: "",
+      expected: "",
+    },
+  ]);
 
   const handleQuizComplete = (score: number, total: number) => {
     setLastScore({ score, total });
     setChallengeUnlocked(true);
   };
 
-  function runHiddenTests() {
+  function runChallengeTests() {
     setRunnerError(null);
     setTestResults([]);
 
@@ -67,29 +102,77 @@ export function AnalysisResults({ result }: AnalysisResultsProps) {
         `${challengeSolution}\nreturn solve(input);`
       ) as (input: unknown) => unknown;
 
-      const nextResults = tests.map((test) => {
+      const hiddenResults = tests.map((test, index) => {
         try {
           const input = parseJsonValue(test.input);
           const expected = parseJsonValue(test.expected);
           const got = runner(input);
           const pass = stableStringify(got) === stableStringify(expected);
           return {
-            test,
+            label: test.name?.trim() ? test.name : `Hidden test ${index + 1}`,
+            kind: "hidden" as const,
             pass,
             got: stableStringify(got),
+            expectedRaw: test.expected,
+            inputRaw: test.input,
           };
         } catch (error) {
           const message =
             error instanceof Error ? error.message : String(error);
           return {
-            test,
+            label: test.name?.trim() ? test.name : `Hidden test ${index + 1}`,
+            kind: "hidden" as const,
             pass: false,
             error: message,
+            expectedRaw: test.expected,
+            inputRaw: test.input,
           };
         }
       });
 
-      setTestResults(nextResults);
+      const customResults = customTests
+        .map((test, index) => {
+          if (!test.input.trim() || !test.expected.trim()) {
+            return null;
+          }
+
+          try {
+            const input = parseJsonValue(test.input);
+            const expected = parseJsonValue(test.expected);
+            const got = runner(input);
+            const pass = stableStringify(got) === stableStringify(expected);
+            return {
+              label: test.name.trim() ? test.name : `Custom test ${index + 1}`,
+              kind: "custom" as const,
+              pass,
+              got: stableStringify(got),
+              expectedRaw: test.expected,
+              inputRaw: test.input,
+            };
+          } catch (error) {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            return {
+              label: test.name.trim() ? test.name : `Custom test ${index + 1}`,
+              kind: "custom" as const,
+              pass: false,
+              error: message,
+              expectedRaw: test.expected,
+              inputRaw: test.input,
+            };
+          }
+        })
+        .filter(Boolean) as Array<{
+        label: string;
+        kind: "custom";
+        pass: boolean;
+        got?: string;
+        expectedRaw?: string;
+        inputRaw?: string;
+        error?: string;
+      }>;
+
+      setTestResults([...hiddenResults, ...customResults]);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setRunnerError(message);
@@ -98,8 +181,11 @@ export function AnalysisResults({ result }: AnalysisResultsProps) {
 
   const handleSubmitSolution = () => {
     setSolutionSubmitted(true);
-    runHiddenTests();
+    runChallengeTests();
   };
+
+  const passedCount = testResults.filter((item) => item.pass).length;
+  const totalRan = testResults.length;
 
   return (
     <div className="space-y-6">
@@ -193,7 +279,7 @@ export function AnalysisResults({ result }: AnalysisResultsProps) {
               Write your own solution before checking external hints.
             </p>
             <div className="flex items-center gap-2">
-              <Button onClick={runHiddenTests} variant="outline" size="sm">
+              <Button onClick={runChallengeTests} variant="outline" size="sm">
                 Run Tests
               </Button>
               <Button onClick={handleSubmitSolution} size="sm">
@@ -204,7 +290,7 @@ export function AnalysisResults({ result }: AnalysisResultsProps) {
 
           {solutionSubmitted ? (
             <div className="rounded-lg border border-accent/30 bg-accent/10 px-4 py-3 text-sm text-foreground">
-              Submitted. Hidden tests were executed locally in your browser.
+              Submitted. Tests were executed locally in your browser.
             </div>
           ) : null}
 
@@ -214,55 +300,188 @@ export function AnalysisResults({ result }: AnalysisResultsProps) {
             </div>
           ) : null}
 
-          {tests.length > 0 ? (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold text-foreground">Hidden tests</p>
-                <p className="text-xs text-muted-foreground">
-                  {testResults.length > 0
-                    ? `${testResults.filter((item) => item.pass).length}/${
-                        testResults.length
-                      } passed`
-                    : "Not run yet"}
-                </p>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-foreground">Test results</p>
+              <p className="text-xs text-muted-foreground">
+                {totalRan > 0 ? `${passedCount}/${totalRan} passed` : "Not run yet"}
+              </p>
+            </div>
+
+            <div className="rounded-lg border border-border bg-secondary/30 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-foreground">My tests</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setCustomTests((prev) => [
+                      ...prev,
+                      {
+                        id: createId(),
+                        name: `My test ${prev.length + 1}`,
+                        input: "",
+                        expected: "",
+                      },
+                    ])
+                  }
+                >
+                  Add row
+                </Button>
               </div>
 
-              {testResults.length > 0 ? (
-                <div className="space-y-2">
-                  {testResults.map((item, index) => (
-                    <div
-                      key={`${item.test.name ?? "test"}-${index}`}
-                      className={`rounded-lg border px-3 py-2 text-sm ${
-                        item.pass
-                          ? "border-success/30 bg-success/10 text-success"
-                          : "border-destructive/30 bg-destructive/10 text-destructive"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="font-medium">{item.test.name ?? `Test ${index + 1}`}</span>
-                        <span className="text-xs">{item.pass ? "PASS" : "FAIL"}</span>
-                      </div>
-                      {item.error ? (
-                        <p className="mt-1 text-xs">{item.error}</p>
-                      ) : (
-                        <p className="mt-1 text-xs">
-                          expected {item.test.expected} · got {item.got}
-                        </p>
-                      )}
+              <p className="text-xs text-muted-foreground">
+                Use JSON strings for input and expected (examples:{" "}
+                <span className="font-mono text-foreground">5</span>,{" "}
+                <span className="font-mono text-foreground">&quot;hi&quot;</span>,{" "}
+                <span className="font-mono text-foreground">[1,2]</span>,{" "}
+                <span className="font-mono text-foreground">{`{"a":1}`}</span>).
+              </p>
+
+              <div className="space-y-3">
+                {customTests.map((test) => (
+                  <div
+                    key={test.id}
+                    className="rounded-lg border border-border bg-card p-3 space-y-2"
+                  >
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <label className="text-xs font-medium text-muted-foreground">
+                        Name
+                        <input
+                          value={test.name}
+                          onChange={(event) =>
+                            setCustomTests((prev) =>
+                              prev.map((row) =>
+                                row.id === test.id
+                                  ? { ...row, name: event.target.value }
+                                  : row
+                              )
+                            )
+                          }
+                          className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+                        />
+                      </label>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="self-start sm:self-center"
+                        onClick={() =>
+                          setCustomTests((prev) =>
+                            prev.length > 1
+                              ? prev.filter((row) => row.id !== test.id)
+                              : prev
+                          )
+                        }
+                      >
+                        Remove
+                      </Button>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Click Run Tests to validate your solution against the generated cases.
-                </p>
-              )}
+
+                    <label className="text-xs font-medium text-muted-foreground">
+                      Input (JSON)
+                      <textarea
+                        value={test.input}
+                        onChange={(event) =>
+                          setCustomTests((prev) =>
+                            prev.map((row) =>
+                              row.id === test.id
+                                ? { ...row, input: event.target.value }
+                                : row
+                            )
+                          )
+                        }
+                        spellCheck={false}
+                        rows={3}
+                        className="mt-1 w-full resize-y rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground"
+                        placeholder='Example: {"n": 10}'
+                      />
+                    </label>
+
+                    <label className="text-xs font-medium text-muted-foreground">
+                      Expected (JSON)
+                      <textarea
+                        value={test.expected}
+                        onChange={(event) =>
+                          setCustomTests((prev) =>
+                            prev.map((row) =>
+                              row.id === test.id
+                                ? { ...row, expected: event.target.value }
+                                : row
+                            )
+                          )
+                        }
+                        spellCheck={false}
+                        rows={3}
+                        className="mt-1 w-full resize-y rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground"
+                        placeholder="Example: 55"
+                      />
+                    </label>
+                  </div>
+                ))}
+              </div>
             </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No hidden tests were returned for this challenge yet.
-            </p>
-          )}
+
+            {tests.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No hidden tests were returned for this challenge yet. You can still use
+                My tests above.
+              </p>
+            ) : null}
+
+            {testResults.length > 0 ? (
+              <div className="space-y-2">
+                {testResults.map((item, index) => (
+                  <div
+                    key={`${item.label}-${index}`}
+                    className={`rounded-lg border px-3 py-2 text-sm ${
+                      item.pass
+                        ? "border-success/30 bg-success/10 text-success"
+                        : "border-destructive/30 bg-destructive/10 text-destructive"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-medium">{item.label}</span>
+                      <span className="text-xs">
+                        {item.kind === "hidden" ? "HIDDEN" : "CUSTOM"} ·{" "}
+                        {item.pass ? "PASS" : "FAIL"}
+                      </span>
+                    </div>
+                    {item.error ? (
+                      <p className="mt-1 text-xs">{item.error}</p>
+                    ) : (
+                      <div className="mt-2 grid gap-2 md:grid-cols-2">
+                        <div>
+                          <p className="text-[11px] font-semibold text-muted-foreground">
+                            Input
+                          </p>
+                          <pre className="mt-1 max-h-40 overflow-auto rounded-md border border-border bg-background p-2 text-xs text-foreground">
+                            {item.inputRaw ? formatJsonLabel(item.inputRaw) : ""}
+                          </pre>
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-semibold text-muted-foreground">
+                            Expected vs got
+                          </p>
+                          <pre className="mt-1 max-h-40 overflow-auto rounded-md border border-border bg-background p-2 text-xs text-foreground">
+                            {`EXPECTED\n${
+                              item.expectedRaw ? formatJsonLabel(item.expectedRaw) : ""
+                            }\n\nGOT\n${item.got ?? ""}`}
+                          </pre>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Click Run Tests to validate your solution against hidden tests and any
+                filled-in custom tests.
+              </p>
+            )}
+          </div>
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-card p-6">
